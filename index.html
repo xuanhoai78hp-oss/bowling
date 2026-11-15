@@ -601,9 +601,8 @@
               <span class="power-meter-fill" id="power-meter-fill"></span>
             </div>
           </div>
-          <button id="throw" type="button">Giữ để lấy đà</button>
-          <button id="reset" class="secondary" type="button">Tiếp</button>
-          <button id="back-to-lobby" class="secondary" type="button">Về sảnh</button>
+          <button id="throw" type="button">Giữ để ném</button>
+          <button class="secondary" id="back-to-lobby" type="button">Về sảnh</button>
         </div>
       </section>
     </main>
@@ -616,7 +615,6 @@
       const powerMeter = document.querySelector("#power-meter");
       const powerMeterFill = document.querySelector("#power-meter-fill");
       const throwButton = document.querySelector("#throw");
-      const resetButton = document.querySelector("#reset");
       const backToLobbyButton = document.querySelector("#back-to-lobby");
       const scoreboardWrap = document.querySelector("#scoreboard-wrap");
       const scoreboardHead = document.querySelector("#scoreboard-head");
@@ -640,9 +638,10 @@
       const centerX = width / 2;
       const pins = [];
       let ball = null;
+      let bowlerReleasePosition = null;
+      let lockedAimOffset = 0;
       let animationFrame = null;
       let chargeAnimationFrame = null;
-      let aimAnimationFrame = null;
       let chargeStartTime = 0;
       let shotTaken = false;
       let impactPlayed = false;
@@ -660,7 +659,7 @@
       let pendingRoll = null;
       let throwChargePhase = "idle";
       let chargePower = 50;
-      let skipThrowClick = false;
+      let nextRollTimeout = null;
 
       try {
         const savedName = window.localStorage.getItem("bowling-character-name");
@@ -979,12 +978,7 @@
           return;
         }
 
-        if (throwChargePhase === "aiming") {
-          throwButton.textContent = "Canh hướng & ném";
-          return;
-        }
-
-        throwButton.textContent = "Giữ để lấy đà";
+        throwButton.textContent = gameFinished ? "Ván mới" : "Giữ để ném";
       }
 
       function resetPinRack() {
@@ -1000,9 +994,9 @@
           cancelAnimationFrame(chargeAnimationFrame);
           chargeAnimationFrame = null;
         }
-        if (aimAnimationFrame !== null) {
-          cancelAnimationFrame(aimAnimationFrame);
-          aimAnimationFrame = null;
+        if (nextRollTimeout !== null) {
+          window.clearTimeout(nextRollTimeout);
+          nextRollTimeout = null;
         }
 
         if (resetRack) {
@@ -1010,20 +1004,19 @@
         }
 
         ball = null;
+        bowlerReleasePosition = null;
+        lockedAimOffset = 0;
         shotTaken = false;
         impactPlayed = false;
         throwChargePhase = "idle";
         chargePower = 50;
         pendingRackReset = false;
         pendingRoll = null;
-        skipThrowClick = false;
         powerField.hidden = true;
         const ownPlayer = gamePlayers.find((player) => player.id === playerId);
         currentFrameIndex = ownPlayer ? getCurrentFrameIndex(ownPlayer) : -1;
         gameFinished = currentFrameIndex < 0;
-        throwButton.disabled = gameFinished;
-        resetButton.disabled = !gameFinished;
-        resetButton.textContent = gameFinished ? "Ván mới" : "Lượt tiếp";
+        throwButton.disabled = false;
         updateControls();
         syncThrowButtonLabel();
         renderRoomBoard();
@@ -1038,9 +1031,9 @@
           cancelAnimationFrame(chargeAnimationFrame);
           chargeAnimationFrame = null;
         }
-        if (aimAnimationFrame !== null) {
-          cancelAnimationFrame(aimAnimationFrame);
-          aimAnimationFrame = null;
+        if (nextRollTimeout !== null) {
+          window.clearTimeout(nextRollTimeout);
+          nextRollTimeout = null;
         }
         if (socket.connected && roomCode) {
           socket.emit("leave_room", { roomCode });
@@ -1055,7 +1048,10 @@
         lobby.hidden = false;
         document.body.classList.remove("is-playing");
         ball = null;
+        bowlerReleasePosition = null;
+        lockedAimOffset = 0;
         shotTaken = false;
+        throwChargePhase = "idle";
         powerField.hidden = true;
         window.history.replaceState(null, "", window.location.pathname);
         renderRoomBoard();
@@ -1096,12 +1092,19 @@
           }
         }
 
+        const heldBall = ball && bowlerReleasePosition
+          ? bowlerReleasePosition
+          : getHeldBallPosition();
+        drawBowler(heldBall);
         if (ball) {
+          if (bowlerReleasePosition) {
+            drawAimLine(lockedAimOffset);
+          }
           drawBall(ball.x, ball.y);
         } else {
-          drawBall(centerX, 842);
-          if (throwChargePhase === "charging" || throwChargePhase === "aiming") {
-            drawAimLine();
+          drawBall(heldBall.x, heldBall.y);
+          if (throwChargePhase === "charging") {
+            drawAimLine(getAimTargetOffset());
           }
         }
       }
@@ -1278,6 +1281,68 @@
         context.restore();
       }
 
+      function getHeldBallPosition() {
+        const elapsed = throwChargePhase === "charging"
+          ? Math.max(0, performance.now() - chargeStartTime)
+          : 0;
+        const progress = Math.min(1, elapsed / 550);
+        const swing = progress * progress * (3 - 2 * progress);
+        return {
+          x: centerX + swing * 24,
+          y: 842 + swing * 32,
+        };
+      }
+
+      function drawBowler(heldBall) {
+        const bodyX = centerX - 55;
+        context.save();
+        context.fillStyle = "#05090cbd";
+        context.strokeStyle = "#05090cbd";
+        context.lineCap = "round";
+        context.lineJoin = "round";
+
+        context.lineWidth = 19;
+        context.beginPath();
+        context.moveTo(bodyX + 16, 850);
+        context.lineTo(bodyX + 39, 846);
+        context.lineTo(heldBall.x - 12, heldBall.y);
+        context.stroke();
+        context.lineWidth = 16;
+        context.beginPath();
+        context.moveTo(bodyX - 17, 850);
+        context.lineTo(bodyX - 38, 879);
+        context.stroke();
+
+        fillPolygon([
+          [bodyX - 26, 890],
+          [bodyX - 3, 894],
+          [bodyX - 20, 970],
+          [bodyX - 48, 970],
+        ], "#05090cbd");
+        fillPolygon([
+          [bodyX + 1, 892],
+          [bodyX + 24, 889],
+          [bodyX + 35, 970],
+          [bodyX + 8, 970],
+        ], "#05090cbd");
+
+        context.beginPath();
+        context.moveTo(bodyX - 31, 840);
+        context.quadraticCurveTo(bodyX - 18, 834, bodyX - 4, 840);
+        context.lineTo(bodyX + 15, 897);
+        context.quadraticCurveTo(bodyX - 2, 909, bodyX - 27, 901);
+        context.closePath();
+        context.fill();
+
+        context.beginPath();
+        context.ellipse(bodyX - 12, 813, 21, 25, 0, 0, Math.PI * 2);
+        context.fill();
+        context.beginPath();
+        context.arc(heldBall.x - 12, heldBall.y, 8, 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+      }
+
       function drawBall(x, y) {
         const radius = Math.max(12, 28 - (842 - y) * 0.018);
         const shine = context.createRadialGradient(
@@ -1309,10 +1374,16 @@
       }
 
       function getAimTargetOffset() {
-        if (throwChargePhase === "charging" || throwChargePhase === "aiming") {
-          const swingAmplitude = 65;
-          const swingSpeed = 1 + (chargePower - 50) * 0.012;
-          return Math.sin(performance.now() / 260 * swingSpeed) * swingAmplitude;
+        if (throwChargePhase === "charging") {
+          const elapsed = Math.max(0, (performance.now() - chargeStartTime) / 1000);
+          const rampDuration = 2.5;
+          const initialSpeed = 1.5;
+          const acceleration = 1.6;
+          const maxSpeed = initialSpeed + acceleration * rampDuration;
+          const rampElapsed = Math.min(elapsed, rampDuration);
+          const rampPhase = initialSpeed * rampElapsed + 0.5 * acceleration * rampElapsed ** 2;
+          const phase = rampPhase + Math.max(0, elapsed - rampDuration) * maxSpeed;
+          return Math.sin(phase) * 65;
         }
 
         return 0;
@@ -1323,15 +1394,16 @@
         return 82 + laneProgress * (292 - 82);
       }
 
-      function drawAimLine() {
-        const targetX = centerX + getAimTargetOffset();
+      function drawAimLine(aimOffset) {
+        const targetX = centerX + aimOffset;
         const arrowColor = "#f4d27a";
         const aimTargetY = 305;
+        const heldBall = bowlerReleasePosition ?? getHeldBallPosition();
         context.strokeStyle = `${arrowColor}cc`;
         context.lineWidth = 4;
         context.setLineDash([9, 12]);
         context.beginPath();
-        context.moveTo(centerX, 820);
+        context.moveTo(heldBall.x, heldBall.y - 18);
         context.lineTo(targetX, aimTargetY);
         context.stroke();
         context.setLineDash([]);
@@ -1499,9 +1571,10 @@
         }
       }
 
-      function calculateKnockdown(aimOffset, power, endY) {
+      function calculateKnockdown(aimOffset, power, endY, startX, startY) {
         const hit = new Set();
         const hitRadius = 12 + power * 0.055;
+        const targetX = centerX + aimOffset;
 
         for (let index = 0; index < pins.length; index += 1) {
           const pin = pins[index];
@@ -1509,8 +1582,8 @@
             continue;
           }
 
-          const pathRatio = (842 - pin.y) / (842 - 305);
-          const ballX = centerX + aimOffset * pathRatio;
+          const pathRatio = (startY - pin.y) / (startY - 305);
+          const ballX = startX + (targetX - startX) * pathRatio;
           if (Math.abs(ballX - centerX) > getLaneHalfWidth(pin.y) - 12) {
             continue;
           }
@@ -1541,23 +1614,24 @@
         return hit;
       }
 
-      function getRollEndpoint(aimOffset, power) {
+      function getRollEndpoint(aimOffset, power, startX, startY) {
         const endY = 842 - (280 + power * 3.2);
-        let lastOnLaneY = 842;
+        let lastOnLaneY = startY;
+        const targetX = centerX + aimOffset;
 
-        for (let y = 842; y >= endY; y -= 4) {
-          const pathRatio = (842 - y) / (842 - 305);
-          const ballOffset = aimOffset * pathRatio;
-          if (Math.abs(ballOffset) > getLaneHalfWidth(y) - 14) {
+        for (let y = startY; y >= endY; y -= 4) {
+          const pathRatio = (startY - y) / (startY - 305);
+          const ballX = startX + (targetX - startX) * pathRatio;
+          if (Math.abs(ballX - centerX) > getLaneHalfWidth(y) - 14) {
             break;
           }
           lastOnLaneY = y;
         }
 
-        const finalY = lastOnLaneY === 842 ? endY : Math.max(endY, lastOnLaneY);
-        const pathRatio = (842 - finalY) / (842 - 305);
+        const finalY = lastOnLaneY === startY ? endY : Math.max(endY, lastOnLaneY);
+        const pathRatio = (startY - finalY) / (startY - 305);
         return {
-          x: centerX + aimOffset * pathRatio,
+          x: startX + (targetX - startX) * pathRatio,
           y: finalY,
         };
       }
@@ -1574,29 +1648,14 @@
         chargeAnimationFrame = requestAnimationFrame(updateChargeProgress);
       }
 
-      function updateAimProgress() {
-        if (throwChargePhase !== "aiming") {
-          aimAnimationFrame = null;
-          return;
-        }
-
-        syncThrowButtonLabel();
-        drawLane();
-        aimAnimationFrame = requestAnimationFrame(updateAimProgress);
-      }
-
       function startHoldingThrow() {
         if (!gameStarted || gameFinished || shotTaken || ball || throwChargePhase === "charging") {
-          return;
-        }
-        if (throwChargePhase === "aiming") {
           return;
         }
 
         throwChargePhase = "charging";
         chargePower = 50;
         chargeStartTime = performance.now();
-        skipThrowClick = true;
         powerField.hidden = false;
         updateControls();
         chargeAnimationFrame = requestAnimationFrame(updateChargeProgress);
@@ -1607,17 +1666,33 @@
           return;
         }
 
+        const aimOffset = getAimTargetOffset();
+        const ballStart = getHeldBallPosition();
+        bowlerReleasePosition = ballStart;
+        lockedAimOffset = aimOffset;
         if (chargeAnimationFrame !== null) {
           cancelAnimationFrame(chargeAnimationFrame);
           chargeAnimationFrame = null;
         }
 
-        throwChargePhase = "aiming";
         chargePower = Math.max(50, Math.min(100, Math.round(chargePower)));
-        skipThrowClick = true;
+        throwChargePhase = "idle";
+        powerField.hidden = true;
+        throwBall(aimOffset, ballStart);
+      }
+
+      function cancelHoldingThrow() {
+        if (throwChargePhase !== "charging") {
+          return;
+        }
+        if (chargeAnimationFrame !== null) {
+          cancelAnimationFrame(chargeAnimationFrame);
+          chargeAnimationFrame = null;
+        }
+        throwChargePhase = "idle";
+        chargePower = 50;
         powerField.hidden = true;
         updateControls();
-        aimAnimationFrame = requestAnimationFrame(updateAimProgress);
       }
 
       function shouldResetRackForNextRoll(frame, frameIndex, pinsDown) {
@@ -1636,8 +1711,8 @@
         if (!pendingRoll) {
           return;
         }
-        resetButton.disabled = true;
-        resetButton.textContent = "Đang lưu…";
+        throwButton.disabled = true;
+        throwButton.textContent = "Đang lưu…";
         try {
           const submittedRoll = pendingRoll;
           const response = await emitRoomCommand("record_roll", {
@@ -1663,28 +1738,27 @@
           gameFinished = currentFrameIndex < 0;
           pendingRackReset = submittedRoll.resetRack || currentFrameIndex !== submittedRoll.frameIndex;
           shotTaken = true;
-          throwButton.disabled = true;
-          resetButton.disabled = false;
-          resetButton.textContent = gameFinished ? "Ván mới" : "Lượt tiếp";
-          resetButton.focus();
+          if (gameFinished) {
+            throwButton.disabled = false;
+            throwButton.textContent = "Ván mới";
+          } else {
+            throwButton.textContent = "Đang chuẩn bị…";
+            nextRollTimeout = window.setTimeout(() => {
+              nextRollTimeout = null;
+              if (gameStarted && !gameFinished && !pendingRoll) {
+                prepareNextRoll(pendingRackReset);
+              }
+            }, 900);
+          }
         } catch (error) {
           gameStatus.textContent = `Chưa đồng bộ được điểm: ${error.message}`;
-          resetButton.disabled = false;
-          resetButton.textContent = "Thử đồng bộ";
+          throwButton.disabled = false;
+          throwButton.textContent = "Thử đồng bộ";
         }
       }
 
-      function throwBall() {
+      function throwBall(aimOffset, ballStart) {
         if (!gameStarted || gameFinished || shotTaken || ball) {
-          return;
-        }
-
-        if (throwChargePhase === "charging") {
-          releaseHoldingThrow();
-          return;
-        }
-
-        if (throwChargePhase !== "aiming") {
           return;
         }
 
@@ -1692,39 +1766,33 @@
           cancelAnimationFrame(chargeAnimationFrame);
           chargeAnimationFrame = null;
         }
-        if (aimAnimationFrame !== null) {
-          cancelAnimationFrame(aimAnimationFrame);
-          aimAnimationFrame = null;
-        }
 
         const power = Math.max(50, Math.min(100, Math.round(chargePower)));
-        const aimOffset = getAimTargetOffset();
-        const endpoint = getRollEndpoint(aimOffset, power);
-        const hitPins = calculateKnockdown(aimOffset, power, endpoint.y);
+        const endpoint = getRollEndpoint(aimOffset, power, ballStart.x, ballStart.y);
+        const hitPins = calculateKnockdown(aimOffset, power, endpoint.y, ballStart.x, ballStart.y);
         const start = performance.now();
         const duration = (1550 - power * 5) / 1.8;
         const impactProgress = endpoint.y < 350
-          ? (842 - 350) / (842 - endpoint.y)
+          ? (ballStart.y - 350) / (ballStart.y - endpoint.y)
           : 1;
         const ownPlayer = gamePlayers.find((player) => player.id === playerId);
         const frameIndex = getCurrentFrameIndex(ownPlayer);
         const currentFrame = ownPlayer.frames[frameIndex];
         const rollIndex = currentFrame.rolls.length;
 
-        throwChargePhase = "idle";
         shotTaken = true;
         impactPlayed = false;
         throwButton.disabled = true;
-        resetButton.disabled = true;
-        ball = { x: centerX, y: 842 };
+        throwButton.textContent = "Bóng đang lăn…";
+        ball = { ...ballStart };
         playRollingSound(duration / 1000);
         drawLane();
 
         function animate(now) {
           const progress = Math.min(1, (now - start) / duration);
           const eased = 1 - (1 - progress) ** 2;
-          ball.x = centerX + (endpoint.x - centerX) * eased;
-          ball.y = 842 + (endpoint.y - 842) * eased;
+          ball.x = ballStart.x + (endpoint.x - ballStart.x) * eased;
+          ball.y = ballStart.y + (endpoint.y - ballStart.y) * eased;
 
           if (progress >= impactProgress && !impactPlayed) {
             impactPlayed = true;
@@ -1733,7 +1801,7 @@
 
           for (const index of hitPins) {
             const pin = pins[index];
-            const pinImpactProgress = (842 - pin.y) / (842 - endpoint.y);
+            const pinImpactProgress = (ballStart.y - pin.y) / (ballStart.y - endpoint.y);
             const pinProgress = Math.max(0, Math.min(1, (progress - pinImpactProgress) / 0.16));
             pin.fallen = true;
             pin.fallAmount = pinProgress;
@@ -1746,6 +1814,7 @@
           }
 
           ball = null;
+          bowlerReleasePosition = null;
           animationFrame = null;
           const knockedDown = hitPins.size;
           for (const index of hitPins) {
@@ -1761,7 +1830,7 @@
             pinsDown: knockedDown,
             resetRack: shouldResetRackForNextRoll(currentFrame, frameIndex, knockedDown),
           };
-          resetButton.textContent = "Đang lưu…";
+          throwButton.textContent = "Đang lưu…";
           drawLane();
           submitPendingRoll();
         }
@@ -1770,32 +1839,21 @@
       }
 
       function resetGame() {
-        if (!gameStarted) {
+        if (!gameStarted || !gameFinished) {
           return;
         }
-        if (pendingRoll) {
-          submitPendingRoll();
-          return;
-        }
-        if (gameFinished) {
-          resetButton.disabled = true;
-          gameStatus.textContent = "Đang bắt đầu ván mới…";
-          emitRoomCommand("restart_player", { roomCode })
-            .then((response) => {
-              applyRoomState(response.room);
-              prepareNextRoll(true);
-            })
-            .catch((error) => {
-              gameStatus.textContent = error.message;
-              resetButton.disabled = false;
-            });
-          return;
-        }
-        if (!shotTaken) {
-          return;
-        }
-        prepareNextRoll(pendingRackReset);
-        throwButton.focus();
+        throwButton.disabled = true;
+        gameStatus.textContent = "Đang bắt đầu ván mới…";
+        emitRoomCommand("restart_player", { roomCode })
+          .then((response) => {
+            applyRoomState(response.room);
+            prepareNextRoll(true);
+          })
+          .catch((error) => {
+            gameStatus.textContent = error.message;
+            throwButton.disabled = false;
+            throwButton.textContent = "Thử lại";
+          });
       }
 
       throwButton.addEventListener("pointerdown", (event) => {
@@ -1803,21 +1861,21 @@
         startHoldingThrow();
       });
       throwButton.addEventListener("pointerup", releaseHoldingThrow);
-      throwButton.addEventListener("pointercancel", releaseHoldingThrow);
+      throwButton.addEventListener("pointercancel", cancelHoldingThrow);
       throwButton.addEventListener("click", (event) => {
-        if (skipThrowClick) {
-          skipThrowClick = false;
+        if (pendingRoll) {
+          submitPendingRoll();
           return;
         }
-        if (event.detail === 0 && throwChargePhase === "idle") {
+        if (gameFinished) {
+          resetGame();
+          return;
+        }
+        if (event.detail === 0 && !shotTaken && throwChargePhase === "idle") {
           startHoldingThrow();
           releaseHoldingThrow();
-          skipThrowClick = false;
-          return;
         }
-        throwBall();
       });
-      resetButton.addEventListener("click", resetGame);
       backToLobbyButton.addEventListener("click", returnToLobby);
       saveCharacterButton.addEventListener("click", savePlayerName);
       createGameButton.addEventListener("click", startGame);
