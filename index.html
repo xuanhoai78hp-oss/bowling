@@ -766,13 +766,13 @@
           return null;
         }
 
-        return frameRolls.reduce((sum, pinsDown) => sum + pinsDown, 0);
+        return Math.min(frameRolls.reduce((sum, pinsDown) => sum + pinsDown, 0), 20);
       }
 
       function isFrameComplete(frame, frameIndex) {
         const rolls = frame.rolls;
         if (frameIndex < 9) {
-          return rolls.length > 0 && (rolls[0] === 10 || rolls.length >= 2);
+          return rolls.length >= (rolls[0] === 10 ? 3 : 2);
         }
         if (rolls.length < 2) {
           return false;
@@ -1462,7 +1462,8 @@
           return null;
         }
 
-        if (!window.AudioContext) {
+        const AudioContextConstructor = window.AudioContext ?? window.webkitAudioContext;
+        if (!AudioContextConstructor) {
           soundEnabled = false;
           console.warn("Trình duyệt này không hỗ trợ Web Audio API.");
           return null;
@@ -1470,7 +1471,7 @@
 
         try {
           if (!audioContext) {
-            audioContext = new window.AudioContext();
+            audioContext = new AudioContextConstructor();
             masterGain = audioContext.createGain();
             masterGain.gain.value = 0.5;
 
@@ -1682,6 +1683,7 @@
           return;
         }
 
+        getAudioContext();
         if (!game.classList.contains("is-scoreboard-collapsed")) {
           rollsSinceScoreboardCollapsed = 0;
           setScoreboardCollapsed(true);
@@ -1734,6 +1736,9 @@
       function shouldResetRackForNextRoll(frame, frameIndex, pinsDown) {
         const rolls = [...frame.rolls, pinsDown];
         if (isFrameComplete({ rolls }, frameIndex)) {
+          return true;
+        }
+        if (frameIndex < 9 && frame.rolls[0] === 10) {
           return true;
         }
         return frameIndex === 9 && (

@@ -72,7 +72,7 @@ function createPlayer(id, name) {
 function isFrameComplete(frame, frameIndex) {
   const rolls = frame.rolls;
   if (frameIndex < 9) {
-    return rolls.length > 0 && (rolls[0] === 10 || rolls.length >= 2);
+    return rolls.length >= (rolls[0] === 10 ? 3 : 2);
   }
 
   if (rolls.length < 2) {
@@ -91,6 +91,9 @@ function getRackRemaining(frame, frameIndex) {
     return 10;
   }
   if (frameIndex < 9) {
+    if (rolls[0] === 10) {
+      return 10;
+    }
     return 10 - rolls[0];
   }
   if (rolls.length === 1) {
@@ -256,7 +259,8 @@ io.on('connection', (socket) => {
 
     frame.rolls.push(payload.pinsDown);
     player.score = player.frames.reduce((total, currentFrame) => {
-      return total + currentFrame.rolls.reduce((sum, pinsDown) => sum + pinsDown, 0);
+      const frameScore = currentFrame.rolls.reduce((sum, pinsDown) => sum + pinsDown, 0);
+      return total + Math.min(frameScore, 20);
     }, 0);
     player.lastRollId = payload.rollId;
     const response = { ok: true, room: getPublicRoom(room) };
