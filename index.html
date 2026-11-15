@@ -326,6 +326,7 @@
         display: grid;
         position: absolute;
         inset: 0;
+        grid-template: minmax(0, 1fr) / minmax(0, 1fr);
         place-items: center;
         min-width: 0;
         min-height: 0;
@@ -482,18 +483,31 @@
         }
 
         .scoreboard {
-          min-width: 560px;
-          font-size: 0.68rem;
+          width: 100%;
+          min-width: 0;
+          table-layout: fixed;
+          font-size: 0.58rem;
         }
 
         .scoreboard th,
         .scoreboard td {
-          min-width: 34px;
-          padding: 3px 2px;
+          min-width: 0;
+          padding: 3px 1px;
         }
 
         .scoreboard th:first-child {
-          min-width: 82px;
+          width: 18%;
+          min-width: 0;
+        }
+
+        .scoreboard-rolls {
+          font-size: 0.48rem;
+          white-space: normal;
+          overflow-wrap: anywhere;
+        }
+
+        .scoreboard-frame-score {
+          font-size: 0.58rem;
         }
 
         .lobby-actions {
@@ -1113,21 +1127,6 @@
           context.lineTo(x + 68, 244);
           context.closePath();
           context.fill();
-        }
-
-        for (const [x, laneNumber] of [[56, "02"], [594, "03"]]) {
-          context.fillStyle = "#080d13b8";
-          context.fillRect(x, 66, 150, 70);
-          context.strokeStyle = "#d6b77c";
-          context.lineWidth = 2;
-          context.strokeRect(x, 66, 150, 70);
-          context.fillStyle = "#b9d1c0";
-          context.font = "700 14px system-ui, sans-serif";
-          context.textAlign = "center";
-          context.fillText(`LANE ${laneNumber}`, x + 75, 91);
-          context.fillStyle = "#f4d27a";
-          context.font = "800 21px system-ui, sans-serif";
-          context.fillText("08   24", x + 75, 120);
         }
 
         for (const x of [92, 267, 533, 708]) {
