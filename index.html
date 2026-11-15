@@ -650,6 +650,7 @@
       const laneTopY = 90;
       const pins = [];
       let ball = null;
+      let ballReturning = false;
       let bowlerReleasePosition = null;
       let lockedAimOffset = 0;
       let animationFrame = null;
@@ -1030,6 +1031,7 @@
         }
 
         ball = null;
+        ballReturning = false;
         bowlerReleasePosition = null;
         lockedAimOffset = 0;
         shotTaken = false;
@@ -1046,6 +1048,18 @@
         updateControls();
         syncThrowButtonLabel();
         renderRoomBoard();
+      }
+
+      function scheduleNextRollPreparation() {
+        if (nextRollTimeout !== null) {
+          window.clearTimeout(nextRollTimeout);
+        }
+        nextRollTimeout = window.setTimeout(() => {
+          nextRollTimeout = null;
+          if (gameStarted && !gameFinished && !pendingRoll && !ballReturning) {
+            prepareNextRoll(pendingRackReset);
+          }
+        }, 900);
       }
 
       function returnToLobby() {
@@ -1076,6 +1090,7 @@
         lobby.hidden = false;
         document.body.classList.remove("is-playing");
         ball = null;
+        ballReturning = false;
         bowlerReleasePosition = null;
         lockedAimOffset = 0;
         shotTaken = false;
@@ -1125,7 +1140,7 @@
           : getHeldBallPosition();
         drawBowler(heldBall);
         if (ball) {
-          if (bowlerReleasePosition) {
+          if (bowlerReleasePosition && !ballReturning) {
             drawAimLine(lockedAimOffset);
           }
           drawBall(ball.x, ball.y);
@@ -1330,6 +1345,9 @@
       function drawBowler(heldBall) {
         const bodyX = centerX - 55;
         context.save();
+        context.translate(heldBall.x, heldBall.y);
+        context.scale(1.2, 1.2);
+        context.translate(-heldBall.x, -heldBall.y);
         context.fillStyle = "#05090cbd";
         context.strokeStyle = "#05090cbd";
         context.lineCap = "round";
@@ -1790,16 +1808,17 @@
           pendingRackReset = submittedRoll.resetRack || currentFrameIndex !== submittedRoll.frameIndex;
           shotTaken = true;
           if (gameFinished) {
-            throwButton.disabled = false;
-            throwButton.textContent = "Ván mới";
-          } else {
+            if (ballReturning) {
+              throwButton.textContent = "Bóng đang quay về…";
+            } else {
+              throwButton.disabled = false;
+              throwButton.textContent = "Ván mới";
+            }
+          } else if (!ballReturning) {
             throwButton.textContent = "Đang chuẩn bị…";
-            nextRollTimeout = window.setTimeout(() => {
-              nextRollTimeout = null;
-              if (gameStarted && !gameFinished && !pendingRoll) {
-                prepareNextRoll(pendingRackReset);
-              }
-            }, 900);
+            scheduleNextRollPreparation();
+          } else {
+            throwButton.textContent = "Bóng đang quay về…";
           }
         } catch (error) {
           gameStatus.textContent = `Chưa đồng bộ được điểm: ${error.message}`;
@@ -1823,6 +1842,7 @@
         const hitPins = calculateKnockdown(aimOffset, power, endpoint.y, ballStart.x, ballStart.y);
         const start = performance.now();
         const duration = 2600 + (100 - power) * 6;
+        const returnDuration = 2500;
         const impactY = pins.length ? pins[pins.length - 1].y : laneTopY;
         const impactProgress = endpoint.y < impactY
           ? (ballStart.y - impactY) / (ballStart.y - endpoint.y)
@@ -1831,6 +1851,7 @@
         const frameIndex = getCurrentFrameIndex(ownPlayer);
         const currentFrame = ownPlayer.frames[frameIndex];
         const rollIndex = currentFrame.rolls.length;
+        let returnStartedAt = null;
 
         shotTaken = true;
         impactPlayed = false;
@@ -1841,67 +1862,105 @@
         drawLane();
 
         function animate(now) {
-          const progress = Math.min(1, (now - start) / duration);
-          const eased = 1 - (1 - progress) ** 3;
-          ball.x = ballStart.x + (endpoint.x - ballStart.x) * eased;
-          ball.y = ballStart.y + (endpoint.y - ballStart.y) * eased;
+          if (returnStartedAt === null) {
+            const progress = Math.min(1, (now - start) / duration);
+            const eased = 1 - (1 - progress) ** 3;
+            ball.x = ballStart.x + (endpoint.x - ballStart.x) * eased;
+            ball.y = ballStart.y + (endpoint.y - ballStart.y) * eased;
 
-          if (eased >= impactProgress && !impactPlayed) {
-            impactPlayed = true;
-            playPinCrash(hitPins.size);
+            if (eased >= impactProgress && !impactPlayed) {
+              impactPlayed = true;
+              playPinCrash(hitPins.size);
+            }
+
+            for (const index of hitPins) {
+              const pin = pins[index];
+              const pinImpactProgress = (ballStart.y - pin.y) / (ballStart.y - endpoint.y);
+              if (eased >= pinImpactProgress && !pin.fallen) {
+                const pathRatio = (ballStart.y - pin.y) / (ballStart.y - laneTopY);
+                const ballXAtImpact = ballStart.x + (centerX + aimOffset - ballStart.x) * pathRatio;
+                let direction = Math.sign(pin.x - ballXAtImpact);
+                if (direction === 0) {
+                  direction = Math.random() < 0.5 ? -1 : 1;
+                }
+                pin.fallen = true;
+                pin.flight = {
+                  startedAt: now,
+                  elapsed: 0,
+                  velocityX: direction * (105 + Math.random() * 175),
+                  velocityY: -(250 + Math.random() * 150),
+                  gravity: 560,
+                  spin: (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 9),
+                };
+              }
+              if (pin.flight) {
+                pin.flight.elapsed = Math.max(0, (now - pin.flight.startedAt) / 1000);
+              }
+            }
+
+            if (progress < 1) {
+              drawLane();
+              animationFrame = requestAnimationFrame(animate);
+              return;
+            }
+
+            const knockedDown = hitPins.size;
+            for (const index of hitPins) {
+              pins[index].removed = true;
+            }
+
+            pendingRoll = {
+              rollId: window.crypto?.randomUUID?.()
+                ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              frameIndex,
+              rollIndex,
+              pinsDown: knockedDown,
+              resetRack: shouldResetRackForNextRoll(currentFrame, frameIndex, knockedDown),
+            };
+            ballReturning = true;
+            returnStartedAt = now;
+            throwButton.textContent = "Bóng đang quay về…";
+            drawLane();
+            submitPendingRoll();
+            animationFrame = requestAnimationFrame(animate);
+            return;
           }
 
-          for (const index of hitPins) {
-            const pin = pins[index];
-            const pinImpactProgress = (ballStart.y - pin.y) / (ballStart.y - endpoint.y);
-            if (eased >= pinImpactProgress && !pin.fallen) {
-              const pathRatio = (ballStart.y - pin.y) / (ballStart.y - laneTopY);
-              const ballXAtImpact = ballStart.x + (centerX + aimOffset - ballStart.x) * pathRatio;
-              let direction = Math.sign(pin.x - ballXAtImpact);
-              if (direction === 0) {
-                direction = Math.random() < 0.5 ? -1 : 1;
-              }
-              pin.fallen = true;
-              pin.flight = {
-                startedAt: now,
-                elapsed: 0,
-                velocityX: direction * (105 + Math.random() * 175),
-                velocityY: -(250 + Math.random() * 150),
-                gravity: 560,
-                spin: (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 9),
-              };
-            }
-            if (pin.flight) {
-              pin.flight.elapsed = Math.max(0, (now - pin.flight.startedAt) / 1000);
-            }
+          const returnProgress = Math.min(1, (now - returnStartedAt) / returnDuration);
+          const easedReturn = 1 - (1 - returnProgress) ** 3;
+          const edgeX = (y) => centerX + getLaneHalfWidth(y) - 26;
+          if (easedReturn < 0.18) {
+            const sideProgress = easedReturn / 0.18;
+            ball.x = endpoint.x + (edgeX(endpoint.y) - endpoint.x) * sideProgress;
+            ball.y = endpoint.y;
+          } else if (easedReturn < 0.85) {
+            const laneProgress = (easedReturn - 0.18) / 0.67;
+            ball.y = endpoint.y + (ballStart.y - endpoint.y) * laneProgress;
+            ball.x = edgeX(ball.y);
+          } else {
+            const homeProgress = (easedReturn - 0.85) / 0.15;
+            ball.x = edgeX(ballStart.y) + (ballStart.x - edgeX(ballStart.y)) * homeProgress;
+            ball.y = ballStart.y;
           }
 
           drawLane();
-          if (progress < 1) {
+          if (returnProgress < 1) {
             animationFrame = requestAnimationFrame(animate);
             return;
           }
 
           ball = null;
+          ballReturning = false;
           bowlerReleasePosition = null;
           animationFrame = null;
-          const knockedDown = hitPins.size;
-          for (const index of hitPins) {
-            pins[index].removed = true;
+          if (gameFinished) {
+            throwButton.disabled = false;
+            throwButton.textContent = "Ván mới";
+          } else if (!pendingRoll) {
+            throwButton.textContent = "Đang chuẩn bị…";
+            scheduleNextRollPreparation();
           }
-
-          shotTaken = true;
-          pendingRoll = {
-            rollId: window.crypto?.randomUUID?.()
-              ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            frameIndex,
-            rollIndex,
-            pinsDown: knockedDown,
-            resetRack: shouldResetRackForNextRoll(currentFrame, frameIndex, knockedDown),
-          };
-          throwButton.textContent = "Đang lưu…";
           drawLane();
-          submitPendingRoll();
         }
 
         animationFrame = requestAnimationFrame(animate);
