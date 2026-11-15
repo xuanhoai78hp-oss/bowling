@@ -401,6 +401,9 @@
         font-weight: 750;
         cursor: pointer;
         transition: background 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none;
+        user-select: none;
       }
 
       button:hover:not(:disabled) {
@@ -771,6 +774,9 @@
 
       function isFrameComplete(frame, frameIndex) {
         const rolls = frame.rolls;
+        if (rolls.length >= 2 && rolls[0] + rolls[1] >= 20) {
+          return true;
+        }
         if (frameIndex < 9) {
           return rolls.length >= (rolls[0] === 10 ? 3 : 2);
         }

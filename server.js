@@ -71,6 +71,9 @@ function createPlayer(id, name) {
 
 function isFrameComplete(frame, frameIndex) {
   const rolls = frame.rolls;
+  if (rolls.length >= 2 && rolls[0] + rolls[1] >= 20) {
+    return true;
+  }
   if (frameIndex < 9) {
     return rolls.length >= (rolls[0] === 10 ? 3 : 2);
   }
