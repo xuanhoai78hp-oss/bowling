@@ -1140,9 +1140,6 @@
           : getHeldBallPosition();
         drawBowler(heldBall);
         if (ball) {
-          if (bowlerReleasePosition && !ballReturning) {
-            drawAimLine(lockedAimOffset);
-          }
           drawBall(ball.x, ball.y);
         } else {
           drawBall(heldBall.x, heldBall.y);
