@@ -1592,13 +1592,17 @@
         source.stop(startAt + duration);
       }
 
-      function playRollingSound(duration) {
+      function playRollingSound(duration, scheduledAt, includeThump = false) {
         const audio = getAudioContext();
         if (!audio) {
           return;
         }
 
-        const startAt = audio.currentTime;
+        const startAt = Math.max(audio.currentTime, scheduledAt ?? audio.currentTime);
+        if (includeThump) {
+          playNoise(0.11, 260, 70, 0.12, startAt);
+          playTone(105, 45, startAt, 0.16, 0.12, "triangle");
+        }
         playNoise(duration, 420, 95, 0.08, startAt);
         playNoise(duration, 1500, 480, 0.035, startAt);
         playTone(86, 42, startAt, duration, 0.17);
@@ -1847,6 +1851,7 @@
         const impactProgress = endpoint.y < impactY
           ? (ballStart.y - impactY) / (ballStart.y - endpoint.y)
           : 1;
+        const impactTime = duration * (1 - Math.cbrt(1 - impactProgress));
         const ownPlayer = gamePlayers.find((player) => player.id === playerId);
         const frameIndex = getCurrentFrameIndex(ownPlayer);
         const currentFrame = ownPlayer.frames[frameIndex];
@@ -1858,7 +1863,14 @@
         throwButton.disabled = true;
         throwButton.textContent = "Bóng đang lăn…";
         ball = { ...ballStart };
-        playRollingSound(duration / 1000);
+        const rollSoundDelay = 0.3;
+        if (impactTime > rollSoundDelay * 1000) {
+          playRollingSound(
+            (impactTime / 1000) - rollSoundDelay,
+            (audioContext?.currentTime ?? 0) + rollSoundDelay,
+            true,
+          );
+        }
         drawLane();
 
         function animate(now) {
@@ -1919,6 +1931,7 @@
             };
             ballReturning = true;
             returnStartedAt = now;
+            playRollingSound(returnDuration / 1000);
             throwButton.textContent = "Bóng đang quay về…";
             drawLane();
             submitPendingRoll();
