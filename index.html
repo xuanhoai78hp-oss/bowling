@@ -1738,8 +1738,8 @@
         if (isFrameComplete({ rolls }, frameIndex)) {
           return true;
         }
-        if (frameIndex < 9 && frame.rolls[0] === 10) {
-          return true;
+        if (frameIndex < 9) {
+          return frame.rolls.length === 0 && pinsDown === 10;
         }
         return frameIndex === 9 && (
           (frame.rolls.length === 0 && pinsDown === 10)
