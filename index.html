@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="vi">
   <head>
@@ -636,6 +637,7 @@
       const width = 800;
       const height = 1000;
       const centerX = width / 2;
+      const laneTopY = 90;
       const pins = [];
       let ball = null;
       let bowlerReleasePosition = null;
@@ -731,8 +733,8 @@
       for (let row = 0; row < pinOffsets.length; row += 1) {
         for (const offset of pinOffsets[row]) {
           pins.push({
-            x: centerX + offset,
-            y: 260 + row * 30,
+            x: centerX + offset * 0.7,
+            y: laneTopY + 18 + row * 17,
             row,
             fallen: false,
             fallAmount: 0,
@@ -1070,15 +1072,15 @@
 
         drawRoomBackdrop();
 
-        const backlight = context.createRadialGradient(centerX, 275, 12, centerX, 275, 340);
+        const backlight = context.createRadialGradient(centerX, laneTopY + 35, 12, centerX, laneTopY + 35, 340);
         backlight.addColorStop(0, "#c9a46e18");
         backlight.addColorStop(1, "#c9a46e00");
         context.fillStyle = backlight;
         context.fillRect(0, 0, width, 560);
 
-        drawAlleyLane(48, 300, 225, 48, 260, 930, "#76543c");
-        drawAlleyLane(752, 500, 225, 48, 260, 930, "#76543c");
-        drawAlleyLane(centerX, centerX, 292, 82, 260, 930, "#d9a964");
+        drawAlleyLane(48, 300, 225, 48, laneTopY, 930, "#76543c");
+        drawAlleyLane(752, 500, 225, 48, laneTopY, 930, "#76543c");
+        drawAlleyLane(centerX, centerX, 292, 82, laneTopY, 930, "#d9a964");
 
         const approach = context.createLinearGradient(0, 920, 0, 1000);
         approach.addColorStop(0, "#282c2b");
@@ -1110,6 +1112,8 @@
       }
 
       function drawRoomBackdrop() {
+        context.save();
+        context.scale(1, 0.3);
         const wall = context.createLinearGradient(0, 0, 0, 270);
         wall.addColorStop(0, "#202b32");
         wall.addColorStop(0.55, "#293238");
@@ -1151,6 +1155,7 @@
         context.lineTo(width, 251);
         context.stroke();
         context.textAlign = "start";
+        context.restore();
       }
 
       function fillPolygon(points, fillStyle) {
@@ -1252,7 +1257,7 @@
       }
 
       function drawPin(pin) {
-        const scale = 0.78 + pin.row * 0.18;
+        const scale = (0.78 + pin.row * 0.18) * 0.68;
         const radiusX = 18 * scale;
         const radiusY = 28 * scale;
         const x = pin.x + (pin.fallen ? pin.fallAmount * 22 : 0);
@@ -1344,7 +1349,8 @@
       }
 
       function drawBall(x, y) {
-        const radius = Math.max(12, 28 - (842 - y) * 0.018);
+        const depth = Math.max(0, Math.min(1, (y - laneTopY) / (842 - laneTopY)));
+        const radius = 12 + depth * 16;
         const shine = context.createRadialGradient(
           x - radius * 0.35,
           y - radius * 0.4,
@@ -1390,14 +1396,14 @@
       }
 
       function getLaneHalfWidth(y) {
-        const laneProgress = Math.max(0, Math.min(1, (y - 260) / (930 - 260)));
+        const laneProgress = Math.max(0, Math.min(1, (y - laneTopY) / (930 - laneTopY)));
         return 82 + laneProgress * (292 - 82);
       }
 
       function drawAimLine(aimOffset) {
         const targetX = centerX + aimOffset;
         const arrowColor = "#f4d27a";
-        const aimTargetY = 305;
+        const aimTargetY = laneTopY;
         const heldBall = bowlerReleasePosition ?? getHeldBallPosition();
         context.strokeStyle = `${arrowColor}cc`;
         context.lineWidth = 4;
@@ -1582,7 +1588,7 @@
             continue;
           }
 
-          const pathRatio = (startY - pin.y) / (startY - 305);
+          const pathRatio = (startY - pin.y) / (startY - laneTopY);
           const ballX = startX + (targetX - startX) * pathRatio;
           if (Math.abs(ballX - centerX) > getLaneHalfWidth(pin.y) - 12) {
             continue;
@@ -1615,12 +1621,12 @@
       }
 
       function getRollEndpoint(aimOffset, power, startX, startY) {
-        const endY = 842 - (280 + power * 3.2);
+        const endY = 190 - (power - 50) * 2.2;
         let lastOnLaneY = startY;
         const targetX = centerX + aimOffset;
 
         for (let y = startY; y >= endY; y -= 4) {
-          const pathRatio = (startY - y) / (startY - 305);
+          const pathRatio = (startY - y) / (startY - laneTopY);
           const ballX = startX + (targetX - startX) * pathRatio;
           if (Math.abs(ballX - centerX) > getLaneHalfWidth(y) - 14) {
             break;
@@ -1629,7 +1635,7 @@
         }
 
         const finalY = lastOnLaneY === startY ? endY : Math.max(endY, lastOnLaneY);
-        const pathRatio = (startY - finalY) / (startY - 305);
+        const pathRatio = (startY - finalY) / (startY - laneTopY);
         return {
           x: startX + (targetX - startX) * pathRatio,
           y: finalY,
@@ -1771,9 +1777,10 @@
         const endpoint = getRollEndpoint(aimOffset, power, ballStart.x, ballStart.y);
         const hitPins = calculateKnockdown(aimOffset, power, endpoint.y, ballStart.x, ballStart.y);
         const start = performance.now();
-        const duration = (1550 - power * 5) / 1.8;
-        const impactProgress = endpoint.y < 350
-          ? (ballStart.y - 350) / (ballStart.y - endpoint.y)
+        const duration = 2600 + (100 - power) * 6;
+        const impactY = pins.length ? pins[pins.length - 1].y : laneTopY;
+        const impactProgress = endpoint.y < impactY
+          ? (ballStart.y - impactY) / (ballStart.y - endpoint.y)
           : 1;
         const ownPlayer = gamePlayers.find((player) => player.id === playerId);
         const frameIndex = getCurrentFrameIndex(ownPlayer);
@@ -1790,7 +1797,7 @@
 
         function animate(now) {
           const progress = Math.min(1, (now - start) / duration);
-          const eased = 1 - (1 - progress) ** 2;
+          const eased = 1 - (1 - progress) ** 3;
           ball.x = ballStart.x + (endpoint.x - ballStart.x) * eased;
           ball.y = ballStart.y + (endpoint.y - ballStart.y) * eased;
 
