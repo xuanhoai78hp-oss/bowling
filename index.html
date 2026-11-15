@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="vi">
   <head>
@@ -48,6 +47,13 @@
         background: rgba(12, 19, 22, 0.62);
         backdrop-filter: blur(14px) saturate(135%);
         box-shadow: 0 12px 32px #0005, inset 0 1px #ffffff12;
+        transition: transform 280ms ease, opacity 280ms ease;
+      }
+
+      .game.is-scoreboard-collapsed .room-board {
+        transform: translateY(calc(-100% - 18px));
+        opacity: 0;
+        pointer-events: none;
       }
 
       .room-meta {
@@ -617,6 +623,7 @@
       const powerMeterFill = document.querySelector("#power-meter-fill");
       const throwButton = document.querySelector("#throw");
       const backToLobbyButton = document.querySelector("#back-to-lobby");
+      const roomBoard = document.querySelector(".room-board");
       const scoreboardWrap = document.querySelector("#scoreboard-wrap");
       const scoreboardHead = document.querySelector("#scoreboard-head");
       const scoreboardBody = document.querySelector("#scoreboard-body");
@@ -662,6 +669,16 @@
       let throwChargePhase = "idle";
       let chargePower = 50;
       let nextRollTimeout = null;
+      let rollsSinceScoreboardCollapsed = 0;
+
+      function setScoreboardCollapsed(collapsed) {
+        game.classList.toggle("is-scoreboard-collapsed", collapsed);
+        roomBoard.setAttribute("aria-hidden", String(collapsed));
+        roomBoard.inert = collapsed;
+        if (!collapsed) {
+          rollsSinceScoreboardCollapsed = 0;
+        }
+      }
 
       try {
         const savedName = window.localStorage.getItem("bowling-character-name");
@@ -737,7 +754,7 @@
             y: laneTopY + 18 + row * 17,
             row,
             fallen: false,
-            fallAmount: 0,
+            flight: null,
             removed: false,
           });
         }
@@ -889,6 +906,7 @@
         roomCode = room.code;
         gamePlayers = room.players;
         gameStarted = true;
+        setScoreboardCollapsed(false);
         lobby.hidden = true;
         game.hidden = false;
         document.body.classList.add("is-playing");
@@ -986,7 +1004,7 @@
       function resetPinRack() {
         for (const pin of pins) {
           pin.fallen = false;
-          pin.fallAmount = 0;
+          pin.flight = null;
           pin.removed = false;
         }
       }
@@ -1045,6 +1063,8 @@
         currentFrameIndex = -1;
         gameFinished = false;
         pendingRoll = null;
+        rollsSinceScoreboardCollapsed = 0;
+        setScoreboardCollapsed(false);
         gameStarted = false;
         game.hidden = true;
         lobby.hidden = false;
@@ -1260,21 +1280,24 @@
         const scale = (0.78 + pin.row * 0.18) * 0.68;
         const radiusX = 18 * scale;
         const radiusY = 28 * scale;
-        const x = pin.x + (pin.fallen ? pin.fallAmount * 22 : 0);
-        const y = pin.y + (pin.fallen ? pin.fallAmount * 15 : 0);
+        const flightTime = pin.flight?.elapsed ?? 0;
+        const x = pin.x + (pin.flight ? pin.flight.velocityX * flightTime : 0);
+        const y = pin.y + (pin.flight
+          ? pin.flight.velocityY * flightTime + 0.5 * pin.flight.gravity * flightTime ** 2
+          : 0);
 
         context.save();
         context.translate(x, y);
-        if (pin.fallen) {
-          context.rotate(-0.95 * pin.fallAmount);
+        if (pin.flight) {
+          context.rotate(pin.flight.spin * flightTime);
         }
 
         context.fillStyle = "#593b2580";
         context.beginPath();
-        context.ellipse(2, 10, radiusX + 6, radiusY + 7, 0, 0, Math.PI * 2);
+        context.ellipse(2, 10 + flightTime * 28, radiusX + 6, radiusY + 7, 0, 0, Math.PI * 2);
         context.fill();
 
-        context.fillStyle = pin.fallen ? "#c8c0ab" : "#fffdf1";
+        context.fillStyle = pin.flight ? "#fffdf1" : pin.fallen ? "#c8c0ab" : "#fffdf1";
         context.beginPath();
         context.ellipse(0, 0, radiusX, radiusY, 0, 0, Math.PI * 2);
         context.fill();
@@ -1659,6 +1682,10 @@
           return;
         }
 
+        if (!game.classList.contains("is-scoreboard-collapsed")) {
+          rollsSinceScoreboardCollapsed = 0;
+          setScoreboardCollapsed(true);
+        }
         throwChargePhase = "charging";
         chargePower = 50;
         chargeStartTime = performance.now();
@@ -1698,6 +1725,9 @@
         throwChargePhase = "idle";
         chargePower = 50;
         powerField.hidden = true;
+        if (rollsSinceScoreboardCollapsed === 0) {
+          setScoreboardCollapsed(false);
+        }
         updateControls();
       }
 
@@ -1735,6 +1765,10 @@
           applyRoomState(response.room);
           if (!gameStarted || !roomCode) {
             return;
+          }
+          rollsSinceScoreboardCollapsed += 1;
+          if (rollsSinceScoreboardCollapsed >= 2) {
+            setScoreboardCollapsed(false);
           }
           const ownPlayer = gamePlayers.find((player) => player.id === playerId);
           if (!ownPlayer) {
@@ -1801,7 +1835,7 @@
           ball.x = ballStart.x + (endpoint.x - ballStart.x) * eased;
           ball.y = ballStart.y + (endpoint.y - ballStart.y) * eased;
 
-          if (progress >= impactProgress && !impactPlayed) {
+          if (eased >= impactProgress && !impactPlayed) {
             impactPlayed = true;
             playPinCrash(hitPins.size);
           }
@@ -1809,9 +1843,26 @@
           for (const index of hitPins) {
             const pin = pins[index];
             const pinImpactProgress = (ballStart.y - pin.y) / (ballStart.y - endpoint.y);
-            const pinProgress = Math.max(0, Math.min(1, (progress - pinImpactProgress) / 0.16));
-            pin.fallen = true;
-            pin.fallAmount = pinProgress;
+            if (eased >= pinImpactProgress && !pin.fallen) {
+              const pathRatio = (ballStart.y - pin.y) / (ballStart.y - laneTopY);
+              const ballXAtImpact = ballStart.x + (centerX + aimOffset - ballStart.x) * pathRatio;
+              let direction = Math.sign(pin.x - ballXAtImpact);
+              if (direction === 0) {
+                direction = Math.random() < 0.5 ? -1 : 1;
+              }
+              pin.fallen = true;
+              pin.flight = {
+                startedAt: now,
+                elapsed: 0,
+                velocityX: direction * (105 + Math.random() * 175),
+                velocityY: -(250 + Math.random() * 150),
+                gravity: 560,
+                spin: (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 9),
+              };
+            }
+            if (pin.flight) {
+              pin.flight.elapsed = Math.max(0, (now - pin.flight.startedAt) / 1000);
+            }
           }
 
           drawLane();
@@ -1854,6 +1905,7 @@
         emitRoomCommand("restart_player", { roomCode })
           .then((response) => {
             applyRoomState(response.room);
+            setScoreboardCollapsed(false);
             prepareNextRoll(true);
           })
           .catch((error) => {
