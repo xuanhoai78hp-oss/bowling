@@ -1310,7 +1310,7 @@
 
       function getAimTargetOffset() {
         if (throwChargePhase === "charging" || throwChargePhase === "aiming") {
-          const swingAmplitude = 150;
+          const swingAmplitude = 65;
           const swingSpeed = 1 + (chargePower - 50) * 0.012;
           return Math.sin(performance.now() / 260 * swingSpeed) * swingAmplitude;
         }
@@ -1702,7 +1702,7 @@
         const endpoint = getRollEndpoint(aimOffset, power);
         const hitPins = calculateKnockdown(aimOffset, power, endpoint.y);
         const start = performance.now();
-        const duration = 1550 - power * 5;
+        const duration = (1550 - power * 5) / 1.8;
         const impactProgress = endpoint.y < 350
           ? (842 - 350) / (842 - endpoint.y)
           : 1;
@@ -1798,9 +1798,11 @@
         throwButton.focus();
       }
 
-      throwButton.addEventListener("pointerdown", startHoldingThrow);
+      throwButton.addEventListener("pointerdown", (event) => {
+        throwButton.setPointerCapture(event.pointerId);
+        startHoldingThrow();
+      });
       throwButton.addEventListener("pointerup", releaseHoldingThrow);
-      throwButton.addEventListener("pointerleave", releaseHoldingThrow);
       throwButton.addEventListener("pointercancel", releaseHoldingThrow);
       throwButton.addEventListener("click", (event) => {
         if (skipThrowClick) {
